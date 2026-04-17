@@ -1,5 +1,5 @@
 const { ActivityType } = require("discord.js");
-const { statusText } = require("../config/env");
+const { statusText, streamUrl } = require("../config/env");
 const { sendLog } = require("../utils/logging");
 const { ensureVoiceConnection, VoiceConnectionStatus } = require("../utils/voice");
 
@@ -8,7 +8,7 @@ function registerSystemEvents(client) {
     console.log(`[READY] Bot aktif: ${client.user.tag}`);
 
     client.user.setPresence({
-      activities: [{ name: statusText, type: ActivityType.Watching }],
+      activities: [{ name: statusText, type: ActivityType.Streaming, url: streamUrl }],
       status: "online"
     });
 
