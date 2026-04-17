@@ -1,80 +1,106 @@
-const { ChannelType } = require("discord.js");
-const { voiceChannelId } = require("../config/env");
-const { sendLog } = require("./logging");
+const { channelLabel, userTag } = require("../utils/format");
+const { sendLog } = require("../utils/logging");
 
-let keepAliveInterval = null;
-let isMoving = false;
+function registerVoiceEvents(client) {
+  client.on("voiceStateUpdate", async (oldState, newState) => {
+    const member = newState.member || oldState.member;
+    if (!member || member.user.bot) return;
 
-async function getTargetChannel(client) {
-  const channel = await client.channels.fetch(voiceChannelId).catch(() => null);
-  if (!channel || channel.type !== ChannelType.GuildVoice) {
-    await sendLog(client, "system", {
-      title: "Ses Baglantisi Basarisiz",
-      description: "VOICE_CHANNEL_ID gecersiz ya da kanal ses kanali degil.",
-      color: 0xed4245
-    });
-    return null;
-  }
-
-  if (!channel.joinable) {
-    await sendLog(client, "system", {
-      title: "Ses Kanalina Girilemiyor",
-      description: "Botun hedef ses kanalina baglanma izni yok.",
-      color: 0xed4245
-    });
-    return null;
-  }
-
-  return channel;
-}
-
-async function ensureVoicePresence(client) {
-  if (isMoving) return;
-
-  const channel = await getTargetChannel(client);
-  if (!channel) return;
-
-  const me = await channel.guild.members.fetchMe().catch(() => null);
-  if (!me) return;
-
-  if (me.voice.channelId === channel.id) return;
-
-  isMoving = true;
-
-  try {
-    await me.voice.setChannel(channel, "Bot sabit ses kanalinda kalacak");
-
-    if (!me.voice.deaf && me.voice.channelId === channel.id) {
-      await me.voice.setDeaf(true, "Bot kulakligi kapali kalacak").catch(() => null);
+    if (!oldState.channelId && newState.channelId) {
+      await sendLog(client, "voice", {
+        title: "Ses Kanalina Giris",
+        emoji: "\u{1F3A7}",
+        summary: "Bir uye ses kanalina baglandi.",
+        color: 0x57f287,
+        author: {
+          name: member.user.tag,
+          iconURL: member.user.displayAvatarURL()
+        },
+        thumbnail: member.user.displayAvatarURL(),
+        fields: [
+          { name: "Kullanici", value: userTag(member.user) },
+          { name: "Kanal", value: channelLabel(newState.channel), inline: true }
+        ]
+      });
+      return;
     }
 
-    await sendLog(client, "system", {
-      title: "Ses Kanalina Baglandi",
-      emoji: "\u{1F3A7}",
-      summary: "Bot hedef ses kanalinda sabitlendi.",
-      description: `${channel.name} kanalinda beklemeye alindi.`,
-      color: 0x57f287
-    });
-  } catch (error) {
-    await sendLog(client, "system", {
-      title: "Ses Kanalina Tasima Hatasi",
-      description: `\`\`\`${String(error).slice(0, 1800)}\`\`\``,
-      color: 0xed4245
-    });
-  } finally {
-    isMoving = false;
-  }
-}
+    if (oldState.channelId && !newState.channelId) {
+      await sendLog(client, "voice", {
+        title: "Ses Kanalindan Cikis",
+        emoji: "\u{1F4F4}",
+        summary: "Bir uye ses kanalindan ayrildi.",
+        color: 0xed4245,
+        author: {
+          name: member.user.tag,
+          iconURL: member.user.displayAvatarURL()
+        },
+        thumbnail: member.user.displayAvatarURL(),
+        fields: [
+          { name: "Kullanici", value: userTag(member.user) },
+          { name: "Kanal", value: channelLabel(oldState.channel), inline: true }
+        ]
+      });
+      return;
+    }
 
-function startVoiceKeeper(client) {
-  if (keepAliveInterval) clearInterval(keepAliveInterval);
+    if (oldState.channelId !== newState.channelId) {
+      await sendLog(client, "voice", {
+        title: "Ses Kanali Degisti",
+        emoji: "\u{1F504}",
+        summary: "Bir uye baska bir ses kanalina tasindi.",
+        color: 0xfee75c,
+        author: {
+          name: member.user.tag,
+          iconURL: member.user.displayAvatarURL()
+        },
+        thumbnail: member.user.displayAvatarURL(),
+        fields: [
+          { name: "Kullanici", value: userTag(member.user) },
+          { name: "Eski Kanal", value: channelLabel(oldState.channel), inline: true },
+          { name: "Yeni Kanal", value: channelLabel(newState.channel), inline: true }
+        ]
+      });
+    }
 
-  keepAliveInterval = setInterval(() => {
-    ensureVoicePresence(client).catch(() => null);
-  }, 30_000);
+    if (oldState.serverMute !== newState.serverMute) {
+      await sendLog(client, "voice", {
+        title: "Sunucu Mute Degisti",
+        emoji: "\u{1F507}",
+        summary: "Bir kullanicinin sunucu mute durumu degisti.",
+        color: 0xfee75c,
+        author: {
+          name: member.user.tag,
+          iconURL: member.user.displayAvatarURL()
+        },
+        thumbnail: member.user.displayAvatarURL(),
+        fields: [
+          { name: "Kullanici", value: userTag(member.user) },
+          { name: "Durum", value: newState.serverMute ? "Mute verildi" : "Mute kaldirildi", inline: true }
+        ]
+      });
+    }
+
+    if (oldState.serverDeaf !== newState.serverDeaf) {
+      await sendLog(client, "voice", {
+        title: "Sunucu Deafen Degisti",
+        emoji: "\u{1F6D1}",
+        summary: "Bir kullanicinin kulaklik erisimi guncellendi.",
+        color: 0xfee75c,
+        author: {
+          name: member.user.tag,
+          iconURL: member.user.displayAvatarURL()
+        },
+        thumbnail: member.user.displayAvatarURL(),
+        fields: [
+          { name: "Kullanici", value: userTag(member.user) },
+          { name: "Durum", value: newState.serverDeaf ? "Kulaklik kapatildi" : "Kulaklik acildi", inline: true }
+        ]
+      });
+    }
+  });
 }
 
 module.exports = {
-  ensureVoicePresence,
-  startVoiceKeeper
+  registerVoiceEvents
 };
