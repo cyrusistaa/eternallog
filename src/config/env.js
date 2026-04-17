@@ -32,5 +32,6 @@ module.exports = {
   token: process.env.DISCORD_TOKEN,
   voiceChannelId: process.env.VOICE_CHANNEL_ID,
   statusText: process.env.STATUS_TEXT || "Developed By Cyrus",
+  streamUrl: process.env.STREAM_URL || "https://twitch.tv/cyrus",
   logChannels
 };
