@@ -1,7 +1,7 @@
 const { ActivityType } = require("discord.js");
 const { statusText, streamUrl } = require("../config/env");
 const { sendLog } = require("../utils/logging");
-const { ensureVoicePresence, startVoiceKeeper } = require("../utils/voice");
+const { ensureVoiceConnection } = require("../utils/voice");
 
 function registerSystemEvents(client) {
   client.once("ready", async () => {
@@ -12,8 +12,7 @@ function registerSystemEvents(client) {
       status: "online"
     });
 
-    await ensureVoicePresence(client);
-    startVoiceKeeper(client);
+    await ensureVoiceConnection(client);
 
     await sendLog(client, "system", {
       title: "Bot Aktif",
