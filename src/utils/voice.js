@@ -10,6 +10,7 @@ const { voiceChannelId } = require("../config/env");
 const { sendLog } = require("./logging");
 
 let reconnectTimer = null;
+let keepAliveTimer = null;
 let isConnecting = false;
 
 function canUseChannel(channel) {
@@ -17,6 +18,36 @@ function canUseChannel(channel) {
     channel.type === ChannelType.GuildVoice ||
     channel.type === ChannelType.GuildStageVoice
   );
+}
+
+function startVoiceStateKeepAlive(client, channel) {
+  if (keepAliveTimer) clearInterval(keepAliveTimer);
+
+  keepAliveTimer = setInterval(() => {
+    try {
+      const shard = client.ws.shards.get(channel.guild.shardId);
+      if (!shard) return;
+
+      console.log("[VOICE] Voice state keepalive gonderiliyor...");
+      shard.send({
+        op: 4,
+        d: {
+          guild_id: channel.guild.id,
+          channel_id: channel.id,
+          self_mute: false,
+          self_deaf: true
+        }
+      });
+    } catch (error) {
+      console.error("[VOICE] Keepalive gonderilemedi:", error);
+    }
+  }, 15_000);
+}
+
+function stopVoiceStateKeepAlive() {
+  if (!keepAliveTimer) return;
+  clearInterval(keepAliveTimer);
+  keepAliveTimer = null;
 }
 
 function scheduleReconnect(client, delay = 8_000) {
@@ -36,7 +67,7 @@ function clearReconnectTimer() {
 
 async function getTargetChannel(client) {
   const channel = await client.channels.fetch(voiceChannelId).catch(() => null);
-  console.log(`[VOICE] Hedef kanal aranıyor: ${voiceChannelId}`);
+  console.log(`[VOICE] Hedef kanal araniyor: ${voiceChannelId}`);
 
   if (!canUseChannel(channel)) {
     console.log("[VOICE] Kanal bulunamadi ya da ses/stage kanali degil.");
@@ -61,20 +92,22 @@ async function getTargetChannel(client) {
   return channel;
 }
 
-function attachConnectionListeners(client, connection) {
+function attachConnectionListeners(client, channel, connection) {
   if (connection.__cyrusListenersAttached) return;
   connection.__cyrusListenersAttached = true;
 
-  connection.on("stateChange", async (oldState, newState) => {
+  connection.on("stateChange", (oldState, newState) => {
     console.log(`[VOICE] ${oldState.status} -> ${newState.status}`);
 
     if (newState.status === VoiceConnectionStatus.Ready) {
       clearReconnectTimer();
+      startVoiceStateKeepAlive(client, channel);
     }
   });
 
   connection.on(VoiceConnectionStatus.Disconnected, async () => {
     console.log("[VOICE] Baglanti koptu, kurtarma deneniyor...");
+    stopVoiceStateKeepAlive();
 
     try {
       await Promise.race([
@@ -100,6 +133,7 @@ function attachConnectionListeners(client, connection) {
 
   connection.on(VoiceConnectionStatus.Destroyed, () => {
     console.log("[VOICE] Baglanti yok edildi, yeniden baglaniyor...");
+    stopVoiceStateKeepAlive();
     scheduleReconnect(client);
   });
 }
@@ -135,12 +169,13 @@ async function ensureVoiceConnection(client) {
       });
     }
 
-    attachConnectionListeners(client, connection);
+    attachConnectionListeners(client, channel, connection);
 
     console.log(`[VOICE] Baglanma deneniyor... guild=${channel.guild.id} channel=${channel.id}`);
     console.log(generateDependencyReport());
 
-    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+    await entersState(connection, VoiceConnectionStatus.Ready, 60_000);
+    startVoiceStateKeepAlive(client, channel);
 
     await sendLog(client, "system", {
       title: "Ses Kanalina Baglandi",
@@ -157,6 +192,8 @@ async function ensureVoiceConnection(client) {
 
     const current = getVoiceConnection(channel.guild.id);
     if (current) current.destroy();
+
+    stopVoiceStateKeepAlive();
 
     await sendLog(client, "system", {
       title: "Ses Baglantisi Zaman Asimi",
