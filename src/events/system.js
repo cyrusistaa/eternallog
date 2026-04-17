@@ -5,6 +5,8 @@ const { ensureVoiceConnection, VoiceConnectionStatus } = require("../utils/voice
 
 function registerSystemEvents(client) {
   client.once("ready", async () => {
+    console.log(`[READY] Bot aktif: ${client.user.tag}`);
+
     client.user.setPresence({
       activities: [{ name: statusText, type: ActivityType.Watching }],
       status: "online"
