@@ -28,4 +28,13 @@ const client = new Client({
 
 registerEvents(client);
 
-client.login(token);
+console.log("[BOOT] Discord bot girisi baslatiliyor...");
+
+client.login(token)
+  .then(() => {
+    console.log("[BOOT] Discord login istegi basariyla gonderildi.");
+  })
+  .catch((error) => {
+    console.error("[BOOT] Discord login basarisiz:", error);
+    process.exit(1);
+  });
