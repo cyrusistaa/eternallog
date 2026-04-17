@@ -1,7 +1,7 @@
 const { ActivityType } = require("discord.js");
 const { statusText, streamUrl } = require("../config/env");
 const { sendLog } = require("../utils/logging");
-const { ensureVoiceConnection, VoiceConnectionStatus } = require("../utils/voice");
+const { ensureVoiceConnection } = require("../utils/voice");
 
 function registerSystemEvents(client) {
   client.once("ready", async () => {
@@ -12,20 +12,7 @@ function registerSystemEvents(client) {
       status: "online"
     });
 
-    const connection = await ensureVoiceConnection(client);
-    if (connection) {
-      connection.on(VoiceConnectionStatus.Disconnected, async () => {
-        await sendLog(client, "system", {
-          title: "Ses Baglantisi Koptu",
-          emoji: "\u{1F4E1}",
-          summary: "Bot ses baglantisini kaybetti.",
-          description: "Bot yeniden baglanmayi deneyecek.",
-          color: 0xed4245
-        });
-
-        setTimeout(() => ensureVoiceConnection(client), 5_000);
-      });
-    }
+    await ensureVoiceConnection(client);
 
     await sendLog(client, "system", {
       title: "Bot Aktif",
