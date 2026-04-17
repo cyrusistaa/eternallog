@@ -30,6 +30,7 @@ GUILD_LOG_CHANNEL_ID=kanal_rol_sunucu_log_kanal_id
 VOICE_LOG_CHANNEL_ID=ses_log_kanal_id
 SYSTEM_LOG_CHANNEL_ID=sistem_log_kanal_id
 STATUS_TEXT=Developed By Cyrus
+STREAM_URL=https://twitch.tv/cyrus
 ```
 
 ## Railway Notu

@@ -1,10 +1,10 @@
 const { ActivityType } = require("discord.js");
 const { statusText, streamUrl } = require("../config/env");
 const { sendLog } = require("../utils/logging");
-const { ensureVoiceConnection } = require("../utils/voice");
+const { joinTargetVoiceChannel, registerVoiceGuard } = require("../utils/voice");
 
 function registerSystemEvents(client) {
-  client.once("ready", async () => {
+  client.once("clientReady", async () => {
     console.log(`[READY] Bot aktif: ${client.user.tag}`);
 
     client.user.setPresence({
@@ -12,7 +12,14 @@ function registerSystemEvents(client) {
       status: "online"
     });
 
-    await ensureVoiceConnection(client);
+    registerVoiceGuard(client);
+
+    console.log("[VOICE] Ses kanalina baglanma akisi baslatiliyor...");
+    setTimeout(() => {
+      joinTargetVoiceChannel(client).catch((error) => {
+        console.error("[VOICE] Ilk baglanti denemesi basarisiz:", error);
+      });
+    }, 5_000);
 
     await sendLog(client, "system", {
       title: "Bot Aktif",
