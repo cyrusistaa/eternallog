@@ -1,5 +1,6 @@
 const {
   entersState,
+  generateDependencyReport,
   getVoiceConnection,
   joinVoiceChannel,
   VoiceConnectionStatus
@@ -11,14 +12,14 @@ const { sendLog } = require("./logging");
 let reconnectTimer = null;
 let isConnecting = false;
 
-function clearReconnectTimer() {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
+function canUseChannel(channel) {
+  return channel && (
+    channel.type === ChannelType.GuildVoice ||
+    channel.type === ChannelType.GuildStageVoice
+  );
 }
 
-function scheduleReconnect(client, delay = 5_000) {
+function scheduleReconnect(client, delay = 8_000) {
   if (reconnectTimer) return;
 
   reconnectTimer = setTimeout(async () => {
@@ -27,81 +28,150 @@ function scheduleReconnect(client, delay = 5_000) {
   }, delay);
 }
 
-async function ensureVoiceConnection(client) {
-  if (isConnecting) return getCurrentConnection(client);
+function clearReconnectTimer() {
+  if (!reconnectTimer) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
 
+async function getTargetChannel(client) {
   const channel = await client.channels.fetch(voiceChannelId).catch(() => null);
-  if (!channel || channel.type !== ChannelType.GuildVoice) {
+  console.log(`[VOICE] Hedef kanal aranıyor: ${voiceChannelId}`);
+
+  if (!canUseChannel(channel)) {
+    console.log("[VOICE] Kanal bulunamadi ya da ses/stage kanali degil.");
     await sendLog(client, "system", {
       title: "Ses Baglantisi Basarisiz",
-      description: "VOICE_CHANNEL_ID gecersiz ya da kanal ses kanali degil.",
+      description: "VOICE_CHANNEL_ID gecersiz ya da kanal ses/stage kanali degil.",
       color: 0xed4245
     });
     return null;
   }
 
-  const existing = getVoiceConnection(channel.guild.id);
-  if (existing && existing.joinConfig.channelId === channel.id) {
-    return existing;
+  if (!channel.joinable) {
+    console.log("[VOICE] Kanal joinable degil. Botun Connect/View izni eksik olabilir.");
+    await sendLog(client, "system", {
+      title: "Ses Kanalina Girilemiyor",
+      description: "Botun hedef ses kanalina girme izni yok.",
+      color: 0xed4245
+    });
+    return null;
   }
 
-  if (existing) {
-    existing.destroy();
+  return channel;
+}
+
+function attachConnectionListeners(client, connection) {
+  if (connection.__cyrusListenersAttached) return;
+  connection.__cyrusListenersAttached = true;
+
+  connection.on("stateChange", async (oldState, newState) => {
+    console.log(`[VOICE] ${oldState.status} -> ${newState.status}`);
+
+    if (newState.status === VoiceConnectionStatus.Ready) {
+      clearReconnectTimer();
+    }
+  });
+
+  connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    console.log("[VOICE] Baglanti koptu, kurtarma deneniyor...");
+
+    try {
+      await Promise.race([
+        entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+        entersState(connection, VoiceConnectionStatus.Connecting, 5_000)
+      ]);
+      console.log("[VOICE] Baglanti kendi kendine toparladi.");
+    } catch (error) {
+      console.error("[VOICE] Baglanti toparlanamadi, yeniden kurulacak.", error);
+      connection.destroy();
+
+      await sendLog(client, "system", {
+        title: "Ses Baglantisi Koptu",
+        emoji: "\u{1F4E1}",
+        summary: "Bot ses kanalindan dustu.",
+        description: "Baglanti yeniden kuruluyor.",
+        color: 0xed4245
+      });
+
+      scheduleReconnect(client);
+    }
+  });
+
+  connection.on(VoiceConnectionStatus.Destroyed, () => {
+    console.log("[VOICE] Baglanti yok edildi, yeniden baglaniyor...");
+    scheduleReconnect(client);
+  });
+}
+
+async function ensureVoiceConnection(client) {
+  if (isConnecting) return null;
+
+  const channel = await getTargetChannel(client);
+  if (!channel) return null;
+
+  const existing = getVoiceConnection(channel.guild.id);
+  if (existing && existing.joinConfig.channelId === channel.id && existing.state.status !== VoiceConnectionStatus.Destroyed) {
+    console.log(`[VOICE] Mevcut baglanti bulundu: ${existing.state.status}`);
+    return existing;
   }
 
   isConnecting = true;
 
-  const connection = joinVoiceChannel({
-    channelId: channel.id,
-    guildId: channel.guild.id,
-    adapterCreator: channel.guild.voiceAdapterCreator,
-    selfDeaf: true,
-    selfMute: false
-  });
-
-  connection.removeAllListeners(VoiceConnectionStatus.Disconnected);
-  connection.removeAllListeners(VoiceConnectionStatus.Destroyed);
-
-  connection.on(VoiceConnectionStatus.Disconnected, async () => {
-    await sendLog(client, "system", {
-      title: "Ses Baglantisi Koptu",
-      emoji: "\u{1F4E1}",
-      summary: "Bot ses kanalindan dustu.",
-      description: "Baglanti yeniden kurulmaya calisiliyor.",
-      color: 0xed4245
+  try {
+    const connection = existing || joinVoiceChannel({
+      channelId: channel.id,
+      guildId: channel.guild.id,
+      adapterCreator: channel.guild.voiceAdapterCreator,
+      selfDeaf: true,
+      selfMute: false
     });
 
-    scheduleReconnect(client);
-  });
+    if (existing) {
+      existing.rejoin({
+        channelId: channel.id,
+        selfDeaf: true,
+        selfMute: false
+      });
+    }
 
-  connection.on(VoiceConnectionStatus.Destroyed, () => {
-    scheduleReconnect(client);
-  });
+    attachConnectionListeners(client, connection);
 
-  try {
-    await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+    console.log(`[VOICE] Baglanma deneniyor... guild=${channel.guild.id} channel=${channel.id}`);
+    console.log(generateDependencyReport());
+
+    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+
+    await sendLog(client, "system", {
+      title: "Ses Kanalina Baglandi",
+      emoji: "\u{1F3A7}",
+      summary: "Bot hedef ses kanalinda aktif.",
+      description: `${channel.name} kanalina baglanildi ve kulaklik kapatildi.`,
+      color: 0x57f287
+    });
+
     clearReconnectTimer();
     return connection;
   } catch (error) {
-    connection.destroy();
+    console.error("[VOICE] Ses baglantisi kurulurken hata:", error);
+
+    const current = getVoiceConnection(channel.guild.id);
+    if (current) current.destroy();
+
     await sendLog(client, "system", {
       title: "Ses Baglantisi Zaman Asimi",
-      description: "Bot hedef ses kanalina baglanamadi.",
+      summary: "Bot kanalda gorunse de voice baglantisi Ready durumuna gecemedi.",
+      description: `\`\`\`${String(error).slice(0, 1800)}\`\`\``,
       color: 0xed4245
     });
-    scheduleReconnect(client, 10_000);
+
+    scheduleReconnect(client, 12_000);
     return null;
   } finally {
     isConnecting = false;
   }
 }
 
-function getCurrentConnection(client) {
-  const guild = client.guilds.cache.find((item) => getVoiceConnection(item.id));
-  return guild ? getVoiceConnection(guild.id) : null;
-}
-
 module.exports = {
-  ensureVoiceConnection,
-  VoiceConnectionStatus
+  ensureVoiceConnection
 };
